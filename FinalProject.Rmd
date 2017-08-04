@@ -1,0 +1,69 @@
+---
+title: "FinalProject"
+author: "Rob Baranowski"
+date: "7/27/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Barbell Lift Analysis
+We examine data from subjects performing barbell lifts and seek to predict how well they performed the lifts according to predefined categories. The data for this project come from this [source](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har).
+
+###Load the Data
+``` {r message=FALSE}
+library(caret)
+training <- read.csv('pml-training.csv')
+testing <- read.csv('pml-testing.csv')
+```
+
+We notice that there are many columns in the testing set that are 100% NA values. We remove these from the testing, training, and validation sets, since they cannot help our predictions on the test set.
+``` {r}
+nonAllNACols <- sapply(testing, function(x){
+  sum(is.na(x))/nrow(testing) < 1
+})  #TRUE for columns with < 100% NA columns
+testing <- testing[, nonAllNACols]   #remove columns that are 100% NA from testing
+training <- training[, nonAllNACols]   #remove columns that are 100% NA from training
+```
+
+We also remove irrelevant columns which note the subjects' names and timestamps for data collection, as well as the "X" column, which seems to be derived from the classe variable, which is the one we want to predict.
+```{r}
+colsToKeep <- names(testing)[!grepl('timestamp|user_name|X',names(testing))]  #remove timestamp and user_name columns
+testing <- testing[, colsToKeep]
+training <- training[, c(head(colsToKeep,-1),"classe")] #do not consider "problem_id" since it is not in training
+set.seed(12345)
+inTrain <- createDataPartition(training$classe, p = 3/4, list = FALSE)
+train <- training[ inTrain,]  #training set
+valid <- training[-inTrain,]  #validation set
+```
+
+### Classification Models
+We fit two models using the training set: a basic classification tree and a boosted forest. Then, we measure the prediction accuracy on the validation set.
+``` {r cache = TRUE, message = FALSE, warning=FALSE}
+#sample <- train[sample(nrow(train),50),]   #use this sample for testing downstream code
+sample = train  #use this to train on full data
+
+tree.barbell <- train(classe ~ .,method="rpart", data=sample)   #train a decision tree
+tree.valid <- predict(tree.barbell, newdata = valid, type = "raw")  #use tree to predict on validation set
+tree.validacc <- sum(tree.valid == valid$classe)/nrow(valid) #accuracy on validation set
+
+boost.barbell <- train(classe ~ ., method="gbm", data = sample, verbose = FALSE)
+boost.valid <- predict(boost.barbell, newdata = valid, type = "raw")
+boost.validacc <- sum(boost.valid == factor(valid$classe))/nrow(valid)
+```
+
+Accuracies on the validation set are `r tree.validacc * 100`% for the tree and `r boost.validacc * 100`% for the boosted forest. We expect similar accuracies for all out-of-sample data, including the test set.
+
+###Predictions on Test Set
+Lastly, we use our tree and boosted forest classifiers to predict outcomes in the test set. 
+```{r message=FALSE}
+testing = testing[,names(testing) != "problem_id"]
+tree.testpred <- predict(tree.barbell, newdata = testing, type = "raw")
+tree.testpred
+boost.testpred <- predict(boost.barbell, newdata = testing, type = "raw")
+boost.testpred
+```
+
+We will use the boosted forest predictions because we expect from them a higher out-of-sample accuracy.
